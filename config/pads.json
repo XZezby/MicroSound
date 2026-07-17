@@ -1,0 +1,62 @@
+[
+  {
+    "key": "1",
+    "label": "Pad 1",
+    "file": "media/pad1.mp4"
+  },
+  {
+    "key": "2",
+    "label": "Pad 2",
+    "file": "media/pad2.mp4"
+  },
+  {
+    "key": "3",
+    "label": "Pad 3",
+    "file": "media/pad3.mp4"
+  },
+  {
+    "key": "4",
+    "label": "Pad 4",
+    "file": "media/pad4.mp4"
+  },
+  {
+    "key": "5",
+    "label": "Pad 5",
+    "file": "media/pad5.mp4"
+  },
+  {
+    "key": "6",
+    "label": "Pad 6",
+    "file": "media/pad6.mp4"
+  },
+  {
+    "key": "7",
+    "label": "Pad 7",
+    "file": "media/pad7.mp4"
+  },
+  {
+    "key": "8",
+    "label": "Pad 8",
+    "file": "media/pad8.mp4"
+  },
+  {
+    "key": "9",
+    "label": "Pad 9",
+    "file": "media/pad9.mp4"
+  },
+  {
+    "key": "0",
+    "label": "Pad 10",
+    "file": "media/pad10.mp4"
+  },
+  {
+    "key": "Q",
+    "label": "Pad Q",
+    "file": "media/pad_q.mp4"
+  },
+  {
+    "key": "W",
+    "label": "Pad W",
+    "file": "media/pad_w.mp4"
+  }
+]
