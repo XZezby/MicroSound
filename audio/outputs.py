@@ -1,6 +1,7 @@
 from typing import Optional
+import threading
 from PySide6.QtMultimedia import QAudioOutput, QAudioFormat
-from PySide6.QtCore import QObject, QByteArray
+from PySide6.QtCore import QObject, QByteArray, QIODevice
 
 class VirtualMicOutput:
     def __init__(self, device_info=None):
@@ -28,6 +29,36 @@ class VirtualMicOutput:
                 self._audio_output.setVolume(self._volume)
             except Exception:
                 pass
+            # prepare internal QIODevice buffer for feeding audio
+            try:
+                class BufferIO(QIODevice):
+                    def __init__(self, parent=None):
+                        super().__init__(parent)
+                        self.buffer = bytearray()
+                        self.open(QIODevice.ReadOnly)
+
+                    def readData(self, maxlen: int) -> bytes:
+                        if not self.buffer:
+                            return bytes(maxlen)
+                        n = min(len(self.buffer), maxlen)
+                        out = bytes(self.buffer[:n])
+                        del self.buffer[:n]
+                        if n < maxlen:
+                            out += b"\x00" * (maxlen - n)
+                        return out
+
+                self._io = BufferIO()
+                self._io_lock = threading.Lock()
+                try:
+                    self._audio_output.start(self._io)
+                except Exception:
+                    # some QAudioOutput variants may require start without IO first
+                    try:
+                        self._audio_output.start()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             self._running = True
         except Exception:
             self._audio_output = None
@@ -37,6 +68,13 @@ class VirtualMicOutput:
         # skeleton: no-op for now; real implementation will feed a QIODevice
         if not self._running:
             return
+        try:
+            # append to io buffer
+            if hasattr(self, "_io") and self._io is not None:
+                with self._io_lock:
+                    self._io.buffer += pcm_bytes
+        except Exception:
+            pass
         # future: write to internal QIODevice feeding QAudioOutput
         # For now, store last buffer for inspection (no playback)
         try:
