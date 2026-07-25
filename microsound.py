@@ -195,6 +195,7 @@ class MicroSoundWindow(QMainWindow):
         self.monitor_output_combo.setCurrentIndex(self.monitor_output_combo.currentIndex() or 0)
         self.monitor_output_combo.currentIndexChanged.connect(self.on_monitor_output_changed)
         self.monitor_status_label = QLabel("")
+        self.virtual_status_label = QLabel("")
 
         # 监听系统设备变更，自动刷新设备列表
         try:
@@ -310,6 +311,7 @@ class MicroSoundWindow(QMainWindow):
         output_controls.addWidget(QLabel("监听设备"))
         output_controls.addWidget(self.monitor_output_combo, 1)
         output_controls.addWidget(self.monitor_status_label)
+        output_controls.addWidget(self.virtual_status_label)
         side_layout.addLayout(output_controls)
 
         input_controls = QHBoxLayout()
@@ -505,6 +507,15 @@ class MicroSoundWindow(QMainWindow):
                 self.device_manager.save_selected_endpoint("primary_output", getattr(selected_device, "id", None))
             except Exception:
                 pass
+        except Exception:
+            pass
+        try:
+            # update virtual status label
+            desc = getattr(selected_device, "description", None)
+            if desc:
+                self.virtual_status_label.setText(f"虚拟输出: {desc}")
+            else:
+                self.virtual_status_label.setText("虚拟输出: 默认输出")
         except Exception:
             pass
 

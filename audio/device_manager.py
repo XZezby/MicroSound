@@ -70,3 +70,23 @@ class DeviceManager:
             return data.get(role)
         except Exception:
             return None
+
+    @staticmethod
+    def find_output_by_id_or_description(endpoint_id: Optional[str], description: Optional[str]):
+        try:
+            for d in QMediaDevices.audioOutputs():
+                try:
+                    raw = d.id()
+                    try:
+                        did = bytes(raw).decode("utf-8")
+                    except Exception:
+                        did = str(raw)
+                    if endpoint_id and did == endpoint_id:
+                        return d
+                    if description and d.description() == description:
+                        return d
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return None

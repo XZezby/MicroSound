@@ -158,27 +158,16 @@ class VirtualMicOutput:
                         pass
                     # attempt to find a matching QAudioDevice by id or description
                     try:
-                        from PySide6.QtMultimedia import QMediaDevices
-                        new_dev = None
-                        if self.device_info is not None:
-                            try:
+                        # try to resolve device via DeviceManager
+                        try:
+                            from audio.device_manager import DeviceManager
+                            new_dev = None
+                            if self.device_info is not None:
                                 saved_id = getattr(self.device_info, "id", None)
                                 saved_desc = getattr(self.device_info, "description", None)
-                                for d in QMediaDevices.audioOutputs():
-                                    try:
-                                        did = d.id()
-                                        try:
-                                            did_s = bytes(did).decode("utf-8")
-                                        except Exception:
-                                            did_s = str(did)
-                                        if saved_id and did_s == saved_id:
-                                            new_dev = d
-                                            break
-                                        if saved_desc and d.description() == saved_desc:
-                                            new_dev = d
-                                            break
-                                    except Exception:
-                                        pass
+                                new_dev = DeviceManager.find_output_by_id_or_description(saved_id, saved_desc)
+                        except Exception:
+                            new_dev = None
                         # recreate audio output
                         try:
                             fmt = QAudioFormat()
