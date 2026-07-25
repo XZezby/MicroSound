@@ -20,7 +20,10 @@ class VirtualMicOutput:
             # leave other format fields default for now
             if self.device_info is not None:
                 try:
-                    self._audio_output = QAudioOutput(self.device_info.device)
+                    try:
+                        self._audio_output = QAudioOutput(self.device_info.device, fmt)
+                    except Exception:
+                        self._audio_output = QAudioOutput(self.device_info.device)
                 except Exception:
                     self._audio_output = QAudioOutput()
             else:
@@ -38,14 +41,18 @@ class VirtualMicOutput:
                         self.open(QIODevice.ReadOnly)
 
                     def readData(self, maxlen: int) -> bytes:
+                        # return up to maxlen bytes, pad with silence if empty
                         if not self.buffer:
-                            return bytes(maxlen)
+                            return b"\x00" * maxlen
                         n = min(len(self.buffer), maxlen)
                         out = bytes(self.buffer[:n])
                         del self.buffer[:n]
                         if n < maxlen:
                             out += b"\x00" * (maxlen - n)
                         return out
+
+                    def bytesAvailable(self) -> int:
+                        return len(self.buffer)
 
                 self._io = BufferIO()
                 self._io_lock = threading.Lock()
@@ -72,15 +79,15 @@ class VirtualMicOutput:
             # append to io buffer
             if hasattr(self, "_io") and self._io is not None:
                 with self._io_lock:
+                    # append and cap buffer size to ~1s to avoid unbounded growth
+                    max_buf = 48000 * 2 * 2  # sample_rate * channels * bytes_per_sample
                     self._io.buffer += pcm_bytes
+                    if len(self._io.buffer) > max_buf:
+                        excess = len(self._io.buffer) - max_buf
+                        del self._io.buffer[:excess]
         except Exception:
             pass
-        # future: write to internal QIODevice feeding QAudioOutput
-        # For now, store last buffer for inspection (no playback)
-        try:
-            self._last_buffer = pcm_bytes
-        except Exception:
-            pass
+        # future: the QAudioOutput pulls from _io.readData
 
     def Stop(self) -> None:
         try:
