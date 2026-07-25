@@ -32,6 +32,15 @@ class VirtualMicOutput:
                 self._audio_output.setVolume(self._volume)
             except Exception:
                 pass
+            # record target format
+            try:
+                self.target_sample_rate = sample_rate
+                self.target_channels = channels
+                self.target_width = 2  # 16-bit
+            except Exception:
+                self.target_sample_rate = sample_rate
+                self.target_channels = channels
+                self.target_width = 2
             # prepare internal QIODevice buffer for feeding audio
             try:
                 class BufferIO(QIODevice):
@@ -141,28 +150,68 @@ class VirtualMicOutput:
                     # attempt restart
                     try:
                         if self._audio_output is not None:
-                            self._audio_output.stop()
-                    except Exception:
-                        pass
-                    try:
-                        fmt = QAudioFormat()
-                        # minimal format; rely on QAudioOutput to negotiate
-                        fmt.setSampleRate(48000)
-                        fmt.setChannelCount(2)
-                        if self.device_info is not None:
                             try:
-                                self._audio_output = QAudioOutput(self.device_info.device, fmt)
-                            except Exception:
-                                self._audio_output = QAudioOutput(self.device_info.device)
-                        else:
-                            self._audio_output = QAudioOutput()
-                        try:
-                            self._audio_output.start(self._io)
-                        except Exception:
-                            try:
-                                self._audio_output.start()
+                                self._audio_output.stop()
                             except Exception:
                                 pass
+                    except Exception:
+                        pass
+                    # attempt to find a matching QAudioDevice by id or description
+                    try:
+                        from PySide6.QtMultimedia import QMediaDevices
+                        new_dev = None
+                        if self.device_info is not None:
+                            try:
+                                saved_id = getattr(self.device_info, "id", None)
+                                saved_desc = getattr(self.device_info, "description", None)
+                                for d in QMediaDevices.audioOutputs():
+                                    try:
+                                        did = d.id()
+                                        try:
+                                            did_s = bytes(did).decode("utf-8")
+                                        except Exception:
+                                            did_s = str(did)
+                                        if saved_id and did_s == saved_id:
+                                            new_dev = d
+                                            break
+                                        if saved_desc and d.description() == saved_desc:
+                                            new_dev = d
+                                            break
+                                    except Exception:
+                                        pass
+                        # recreate audio output
+                        try:
+                            fmt = QAudioFormat()
+                            fmt.setSampleRate(getattr(self, "target_sample_rate", 48000))
+                            fmt.setChannelCount(getattr(self, "target_channels", 2))
+                            if new_dev is not None:
+                                try:
+                                    self._audio_output = QAudioOutput(new_dev, fmt)
+                                except Exception:
+                                    self._audio_output = QAudioOutput(new_dev)
+                            else:
+                                # fall back to previous device_info.device if available
+                                if self.device_info is not None and hasattr(self.device_info, "device"):
+                                    try:
+                                        self._audio_output = QAudioOutput(self.device_info.device, fmt)
+                                    except Exception:
+                                        self._audio_output = QAudioOutput(self.device_info.device)
+                                else:
+                                    self._audio_output = QAudioOutput()
+                        except Exception:
+                            pass
+                        try:
+                            # restart pulling
+                            if hasattr(self, "_io") and self._io is not None:
+                                try:
+                                    self._audio_output.start(self._io)
+                                except Exception:
+                                    try:
+                                        self._audio_output.start()
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
                     except Exception:
                         pass
         except Exception:

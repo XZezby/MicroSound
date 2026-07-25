@@ -90,10 +90,21 @@ class AudioEngine:
         while self._running:
             pcm = self.mixer.Mix(frames)
             if pcm:
-                # write same immutable pcm to all outputs
+                # write same immutable pcm to all outputs, converting if target format differs
                 for out in list(self.outputs):
                     try:
-                        out.WriteFrames(pcm)
+                        tgt_bs = getattr(out, "target_sample_rate", None)
+                        tgt_ch = getattr(out, "target_channels", None)
+                        tgt_w = getattr(out, "target_width", None)
+                        if tgt_bs and (tgt_bs != self.mixer.sample_rate or tgt_ch != self.mixer.channels or tgt_w != 2):
+                            try:
+                                from .format_converter import convert_raw_pcm
+                                pcm2 = convert_raw_pcm(pcm, self.mixer.sample_rate, self.mixer.channels, 2, tgt_bs, tgt_ch, tgt_w)
+                            except Exception:
+                                pcm2 = pcm
+                        else:
+                            pcm2 = pcm
+                        out.WriteFrames(pcm2)
                     except Exception:
                         pass
             time.sleep(frame_duration)
