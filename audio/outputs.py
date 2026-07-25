@@ -64,6 +64,11 @@ class VirtualMicOutput:
                         self._audio_output.start()
                     except Exception:
                         pass
+                # connect stateChanged to attempt recovery
+                try:
+                    self._audio_output.stateChanged.connect(self._on_state_changed)
+                except Exception:
+                    pass
             except Exception:
                 pass
             self._running = True
@@ -93,12 +98,24 @@ class VirtualMicOutput:
         try:
             if self._audio_output is not None:
                 try:
-                    self._audio_output.stop()
+                    try:
+                        self._audio_output.stop()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             self._running = False
         finally:
             self._audio_output = None
+            try:
+                if hasattr(self, "_io") and self._io is not None:
+                    try:
+                        self._io.close()
+                    except Exception:
+                        pass
+                    self._io = None
+            except Exception:
+                pass
 
     @property
     def DeviceId(self) -> Optional[str]:
@@ -109,6 +126,45 @@ class VirtualMicOutput:
         try:
             if self._audio_output is not None:
                 self._audio_output.setVolume(volume)
+        except Exception:
+            pass
+
+    def _on_state_changed(self, state) -> None:
+        # simple recovery: if audio output becomes Stopped/Idle unexpectedly while running, try to restart
+        try:
+            from PySide6.QtMultimedia import QAudio
+            if not self._running:
+                return
+            # QAudio.ActiveState / IdleState / StoppedState / SuspendedState
+            try:
+                if state == QAudio.StoppedState or state == QAudio.IdleState:
+                    # attempt restart
+                    try:
+                        if self._audio_output is not None:
+                            self._audio_output.stop()
+                    except Exception:
+                        pass
+                    try:
+                        fmt = QAudioFormat()
+                        # minimal format; rely on QAudioOutput to negotiate
+                        fmt.setSampleRate(48000)
+                        fmt.setChannelCount(2)
+                        if self.device_info is not None:
+                            try:
+                                self._audio_output = QAudioOutput(self.device_info.device, fmt)
+                            except Exception:
+                                self._audio_output = QAudioOutput(self.device_info.device)
+                        else:
+                            self._audio_output = QAudioOutput()
+                        try:
+                            self._audio_output.start(self._io)
+                        except Exception:
+                            try:
+                                self._audio_output.start()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
         except Exception:
             pass
 

@@ -510,6 +510,21 @@ class MicroSoundWindow(QMainWindow):
 
     def on_monitor_output_changed(self, *_args: object) -> None:
         self._apply_selected_monitor_output()
+        # update monitor output device_info and restart if enabled
+        try:
+            sel = self.monitor_output_combo.currentData()
+            self.monitor_output.device_info = sel
+            if self.monitor_output_enabled:
+                try:
+                    self.monitor_output.Stop()
+                except Exception:
+                    pass
+                try:
+                    self.monitor_output.Start()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _apply_selected_monitor_output(self) -> None:
         selected_device = self.monitor_output_combo.currentData()
@@ -595,6 +610,21 @@ class MicroSoundWindow(QMainWindow):
 
     def on_audio_output_changed(self, *_args: object) -> None:
         self._apply_selected_audio_output()
+        # update virtual output device_info and restart if enabled
+        try:
+            sel = self.audio_output_combo.currentData()
+            self.virtual_output.device_info = sel
+            if self.virtual_output_enabled:
+                try:
+                    self.virtual_output.Stop()
+                except Exception:
+                    pass
+                try:
+                    self.virtual_output.Start()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def on_input_device_changed(self, *_args: object) -> None:
         self._apply_input_device_selection()
@@ -641,6 +671,11 @@ class MicroSoundWindow(QMainWindow):
         # 主输出始终使用配置的音量（用于推送到虚拟线/远端）
         try:
             self.audio.setVolume(volume)
+            try:
+                if hasattr(self, "virtual_output") and self.virtual_output is not None:
+                    self.virtual_output.setVolume(volume)
+            except Exception:
+                pass
         except Exception:
             pass
         # 监听输出使用独立监听音量（受本地监听开关控制）
@@ -656,6 +691,11 @@ class MicroSoundWindow(QMainWindow):
         try:
             if self.local_hear_checkbox.isChecked():
                 self.audio_monitor.setVolume(volume)
+                try:
+                    if hasattr(self, "monitor_output") and self.monitor_output is not None:
+                        self.monitor_output.setVolume(volume)
+                except Exception:
+                    pass
             else:
                 self.audio_monitor.setVolume(0.0)
         except Exception:
