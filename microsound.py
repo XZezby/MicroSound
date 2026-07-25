@@ -160,18 +160,9 @@ class MicroSoundWindow(QMainWindow):
 
         self.input_devices = list(QMediaDevices.audioInputs())
         self.input_device_combo = QComboBox()
-        self.input_device_combo.addItem("优先 Stereo Mix / What U Hear", None)
-        preferred_names = ["stereo mix", "what u hear", "what-u-hear", "stereo-mix", "listen to this device"]
-        preferred_devices = []
+        self.input_device_combo.addItem("默认输入设备", None)
         for device in self.input_devices:
-            description = device.description().lower()
-            if any(name in description for name in preferred_names):
-                preferred_devices.append(device)
-        for device in preferred_devices:
             self.input_device_combo.addItem(device.description(), device)
-        for device in self.input_devices:
-            if device not in preferred_devices:
-                self.input_device_combo.addItem(device.description(), device)
         self.input_device_combo.setCurrentIndex(0)
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
 
@@ -418,31 +409,11 @@ class MicroSoundWindow(QMainWindow):
     def on_input_device_changed(self, *_args: object) -> None:
         self._apply_input_device_selection()
 
-    def _is_loopback_input_device(self, device: object = None) -> bool:
-        if device is None:
-            return False
-
-        description = str(device.description()).lower()
-        loopback_markers = ["stereo mix", "what u hear", "what-u-hear", "stereo-mix", "listen to this device"]
-        return any(marker in description for marker in loopback_markers)
-
     def _apply_input_device_selection(self) -> None:
         selected_input = self.input_device_combo.currentData()
         if selected_input is None:
             self.local_hear_checkbox.setEnabled(True)
-            self.statusBar().showMessage(
-                "已优先尝试 Stereo Mix / What U Hear；若系统未暴露该输入源，程序将无法把音频直接送入它。",
-                4000,
-            )
-            return
-
-        if self._is_loopback_input_device(selected_input):
-            self.local_hear_checkbox.setChecked(False)
-            self.local_hear_checkbox.setEnabled(False)
-            self.statusBar().showMessage(
-                f"已选择混音输入：{selected_input.description()}。为避免回音，已自动关闭本地监听。",
-                5000,
-            )
+            self.statusBar().showMessage("已使用默认输入设备。", 3000)
             return
 
         self.local_hear_checkbox.setEnabled(True)
@@ -452,13 +423,6 @@ class MicroSoundWindow(QMainWindow):
         self._apply_volume(value / 100)
 
     def on_local_hear_changed(self, enabled: bool) -> None:
-        selected_input = self.input_device_combo.currentData()
-        if self._is_loopback_input_device(selected_input):
-            self.local_hear_checkbox.setChecked(False)
-            self._apply_volume(0.0)
-            self.statusBar().showMessage("混音输入会把本地输出再次采进去，因此已自动关闭本地监听。", 4000)
-            return
-
         self._apply_volume(self.volume_slider.value() / 100)
         self.statusBar().showMessage("本地监听已开启" if enabled else "本地监听已关闭", 2000)
 

@@ -1,23 +1,21 @@
+#!/usr/bin/env python3
 import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
-REQUIREMENTS = ROOT / "requirements.txt"
+REQ = ROOT / "requirements.txt"
 
 
 def main() -> int:
-    if not REQUIREMENTS.exists():
-        print(f"Cannot find requirements file: {REQUIREMENTS}")
+    if not REQ.exists():
+        print(f"Requirements file not found: {REQ}")
         return 1
 
-    command = [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS)]
+    cmd = [sys.executable, "-m", "pip", "install", "-r", str(REQ)]
     print("Installing dependencies...")
-    print("Command:", " ".join(command))
-
-    result = subprocess.run(command, cwd=str(ROOT))
-    return result.returncode
+    print(" ".join(cmd))
+    return subprocess.call(cmd)
 
 
 if __name__ == "__main__":
