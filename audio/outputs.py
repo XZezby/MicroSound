@@ -38,7 +38,11 @@ class VirtualMicOutput:
         if not self._running:
             return
         # future: write to internal QIODevice feeding QAudioOutput
-        return
+        # For now, store last buffer for inspection (no playback)
+        try:
+            self._last_buffer = pcm_bytes
+        except Exception:
+            pass
 
     def Stop(self) -> None:
         try:

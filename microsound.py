@@ -376,23 +376,22 @@ class MicroSoundWindow(QMainWindow):
             self.statusBar().showMessage(f"缺少文件: {path}", 4000)
             return
 
+        # switch to AudioMixer-based playback: create FileAudioSource and add to mixer
+        from audio.file_source import FileAudioSource
+        from audio.mixer import AudioMixer, AudioEngine
+
+        # lazy-init mixer/engine
+        if not hasattr(self, "mixer"):
+            self.mixer = AudioMixer()
+            self.audio_engine = AudioEngine(self.mixer, outputs=[self.virtual_output, self.monitor_output], frame_size=1024)
+            self.audio_engine.start()
+
+        src = FileAudioSource(str(path), target_sample_rate=self.mixer.sample_rate, target_channels=self.mixer.channels)
+        self.mixer.AddSource(src)
         self.set_active_pad(index)
         self.now_label.setText(f"{pad.key} / {pad.label}")
         self.path_label.setText(str(path))
-        self.player.setSource(QUrl.fromLocalFile(str(path)))
-        self.player.setPosition(0)
-        self.player.play()
-        # 同步启动本地监听播放器（仅作为监听分支 B）
-        try:
-            self.player_monitor.setSource(QUrl.fromLocalFile(str(path)))
-            self.player_monitor.setPosition(0)
-            if self.local_hear_checkbox.isChecked():
-                self.player_monitor.play()
-            else:
-                self.player_monitor.stop()
-        except Exception:
-            pass
-        self.statusBar().showMessage(f"播放: {path.name}", 2500)
+        self.statusBar().showMessage(f"播放(混音引擎): {path.name}", 2500)
 
     def bind_pad(self, index: int) -> None:
         pad = self.pads[index]
