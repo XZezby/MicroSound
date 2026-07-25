@@ -4,7 +4,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QUrl, Signal, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioDevice, QAudioOutput, QMediaDevices, QMediaPlayer
 from audio.device_manager import DeviceManager
@@ -221,6 +221,15 @@ class MicroSoundWindow(QMainWindow):
         sel_monitor = self.monitor_output_combo.currentData()
         self.virtual_output = VirtualMicOutput(device_info=sel_primary)
         self.monitor_output = MonitorOutput(device_info=sel_monitor)
+        # wire status callbacks to update UI labels safely on the main thread
+        try:
+            def make_updater(label):
+                return lambda text: QTimer.singleShot(0, lambda: label.setText(text))
+
+            self.virtual_output.set_status_callback(make_updater(self.virtual_status_label))
+            self.monitor_output.set_status_callback(make_updater(self.monitor_status_label))
+        except Exception:
+            pass
         self.player.mediaStatusChanged.connect(self.on_media_status)
         self.player.errorOccurred.connect(self.on_player_error)
 
