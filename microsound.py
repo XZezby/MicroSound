@@ -167,6 +167,9 @@ class MicroSoundWindow(QMainWindow):
             self.monitor_output_combo.addItem(device.description(), device)
         self.monitor_output_combo.setCurrentIndex(0)
         self.monitor_output_combo.currentIndexChanged.connect(self.on_monitor_output_changed)
+        # 降阶实现：额外的 QMediaPlayer 用于本地监听（将来替换为单一 AudioEngine）
+        self.player_monitor = QMediaPlayer(self)
+        self.player_monitor.setAudioOutput(self.audio_monitor)
 
         self.input_devices = list(QMediaDevices.audioInputs())
         self.input_device_combo = QComboBox()
@@ -177,6 +180,7 @@ class MicroSoundWindow(QMainWindow):
         self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
 
         self._apply_selected_audio_output()
+        self._apply_selected_monitor_output()
         self.player.mediaStatusChanged.connect(self.on_media_status)
         self.player.errorOccurred.connect(self.on_player_error)
 
@@ -322,6 +326,16 @@ class MicroSoundWindow(QMainWindow):
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self.player.setPosition(0)
         self.player.play()
+        # 同步启动本地监听播放器（仅作为监听分支 B）
+        try:
+            self.player_monitor.setSource(QUrl.fromLocalFile(str(path)))
+            self.player_monitor.setPosition(0)
+            if self.local_hear_checkbox.isChecked():
+                self.player_monitor.play()
+            else:
+                self.player_monitor.stop()
+        except Exception:
+            pass
         self.statusBar().showMessage(f"播放: {path.name}", 2500)
 
     def bind_pad(self, index: int) -> None:
@@ -366,18 +380,32 @@ class MicroSoundWindow(QMainWindow):
             return
 
         state = self.player.playbackState()
+        # 同步控制两个播放器的暂停/继续
         if state == QMediaPlayer.PlayingState:
             self.player.pause()
+            try:
+                self.player_monitor.pause()
+            except Exception:
+                pass
             self.now_label.setText(f"{self.pads[self.active_index].key} / {self.pads[self.active_index].label} (已暂停)")
             self.statusBar().showMessage("已暂停", 2000)
         elif state == QMediaPlayer.PausedState:
             self.player.play()
+            try:
+                if self.local_hear_checkbox.isChecked():
+                    self.player_monitor.play()
+            except Exception:
+                pass
             self.statusBar().showMessage("继续播放", 2000)
         else:
             self.play_pad(self.active_index)
 
     def stop(self) -> None:
         self.player.stop()
+        try:
+            self.player_monitor.stop()
+        except Exception:
+            pass
         self.clear_active_pad()
         self.now_label.setText("已停止")
         self.statusBar().showMessage("已停止播放", 2000)
@@ -456,10 +484,19 @@ class MicroSoundWindow(QMainWindow):
         self.statusBar().showMessage("本地监听已开启" if enabled else "本地监听已关闭", 2000)
 
     def _apply_volume(self, volume: float) -> None:
-        if self.local_hear_checkbox.isChecked():
+        # 主输出始终使用配置的音量（用于推送到虚拟线/远端）
+        try:
             self.audio.setVolume(volume)
-        else:
-            self.audio.setVolume(0.0)
+        except Exception:
+            pass
+        # 监听输出由本地监听开关控制
+        try:
+            if self.local_hear_checkbox.isChecked():
+                self.audio_monitor.setVolume(volume)
+            else:
+                self.audio_monitor.setVolume(0.0)
+        except Exception:
+            pass
 
     def on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.EndOfMedia:
