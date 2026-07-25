@@ -73,20 +73,57 @@ class DeviceManager:
 
     @staticmethod
     def find_output_by_id_or_description(endpoint_id: Optional[str], description: Optional[str]):
+        # Exact id/description match first, then fuzzy description substring match (case-insensitive)
         try:
-            for d in QMediaDevices.audioOutputs():
-                try:
-                    raw = d.id()
+            outputs = list(QMediaDevices.audioOutputs())
+            # exact id match
+            if endpoint_id:
+                for d in outputs:
                     try:
-                        did = bytes(raw).decode("utf-8")
+                        raw = d.id()
+                        try:
+                            did = bytes(raw).decode("utf-8")
+                        except Exception:
+                            did = str(raw)
+                        if did == endpoint_id:
+                            return d
                     except Exception:
-                        did = str(raw)
-                    if endpoint_id and did == endpoint_id:
-                        return d
-                    if description and d.description() == description:
-                        return d
-                except Exception:
-                    pass
+                        pass
+            # exact description match
+            if description:
+                for d in outputs:
+                    try:
+                        if d.description() == description:
+                            return d
+                    except Exception:
+                        pass
+            # fuzzy substring (case-insensitive)
+            if description:
+                desc_low = description.lower()
+                for d in outputs:
+                    try:
+                        if desc_low in d.description().lower():
+                            return d
+                    except Exception:
+                        pass
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def get_reconnect_interval(default: float = 3.0) -> float:
+        """Read reconnect interval (seconds) from the saved config if present, else return default."""
+        try:
+            if CONFIG_PATH.exists():
+                with CONFIG_PATH.open("r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                val = data.get("reconnect_interval")
+                if val is None:
+                    return default
+                try:
+                    return float(val)
+                except Exception:
+                    return default
+        except Exception:
+            pass
+        return default

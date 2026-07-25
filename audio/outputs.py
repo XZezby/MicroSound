@@ -11,10 +11,18 @@ class VirtualMicOutput:
         self._running = False
         self._volume = 0.85
         self._device_id = getattr(device_info, "id", None) if device_info is not None else None
-        self._reconnect_interval = 3.0
+        # try to obtain reconnect interval from DeviceManager if available
+        try:
+            from audio.device_manager import DeviceManager
+            self._reconnect_interval = DeviceManager.get_reconnect_interval(3.0)
+        except Exception:
+            self._reconnect_interval = 3.0
         self._reconnect_thread: Optional[threading.Thread] = None
         self._reconnect_stop = threading.Event()
         self._status_callback = None
+        # buffering/latency control
+        self._max_latency_ms = 500
+        self._partial_frame = bytearray()
 
     def Start(self, sample_rate: int = 48000, channels: int = 2, sample_format=None) -> None:
         # skeleton: create QAudioOutput configured to device if possible
@@ -98,9 +106,26 @@ class VirtualMicOutput:
             # append to io buffer
             if hasattr(self, "_io") and self._io is not None:
                 with self._io_lock:
-                    # append and cap buffer size to ~1s to avoid unbounded growth
-                    max_buf = 48000 * 2 * 2  # sample_rate * channels * bytes_per_sample
-                    self._io.buffer += pcm_bytes
+                    bytes_per_sample = getattr(self, "target_width", 2)
+                    channels = getattr(self, "target_channels", 2)
+                    bytes_per_frame = bytes_per_sample * channels
+                    # prepend any partial frame from previous call
+                    data = bytes(self._partial_frame) + pcm_bytes
+                    # compute whole frames to write
+                    if bytes_per_frame > 0:
+                        n_frames = len(data) // bytes_per_frame
+                        to_write = data[: n_frames * bytes_per_frame]
+                        remainder = data[n_frames * bytes_per_frame :]
+                    else:
+                        to_write = data
+                        remainder = b""
+                    # store remainder for next call
+                    self._partial_frame = bytearray(remainder)
+                    # append and cap buffer size according to _max_latency_ms
+                    sample_rate = getattr(self, "target_sample_rate", 48000)
+                    max_buf = int(sample_rate * channels * bytes_per_sample * (self._max_latency_ms / 1000.0))
+                    if to_write:
+                        self._io.buffer += to_write
                     if len(self._io.buffer) > max_buf:
                         excess = len(self._io.buffer) - max_buf
                         del self._io.buffer[:excess]
@@ -141,6 +166,16 @@ class VirtualMicOutput:
                 self._reconnect_stop.set()
             except Exception:
                 pass
+            try:
+                self._partial_frame = bytearray()
+            except Exception:
+                pass
+
+    def set_max_latency(self, ms: int) -> None:
+        try:
+            self._max_latency_ms = int(ms)
+        except Exception:
+            pass
 
     @property
     def DeviceId(self) -> Optional[str]:

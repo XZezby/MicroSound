@@ -321,6 +321,13 @@ class MicroSoundWindow(QMainWindow):
         output_controls.addWidget(self.monitor_output_combo, 1)
         output_controls.addWidget(self.monitor_status_label)
         output_controls.addWidget(self.virtual_status_label)
+        # rebind buttons for manual retry
+        self.rebind_virtual_btn = QPushButton("重新绑定虚拟输出")
+        self.rebind_virtual_btn.clicked.connect(self.rebind_virtual_output)
+        output_controls.addWidget(self.rebind_virtual_btn)
+        self.rebind_monitor_btn = QPushButton("重新绑定监听输出")
+        self.rebind_monitor_btn.clicked.connect(self.rebind_monitor_output)
+        output_controls.addWidget(self.rebind_monitor_btn)
         side_layout.addLayout(output_controls)
 
         input_controls = QHBoxLayout()
@@ -425,6 +432,71 @@ class MicroSoundWindow(QMainWindow):
         self.pad_buttons[index].refresh(self.pads[index])
         save_pads(self.pads)
         self.statusBar().showMessage(f"{pad.key} 已绑定到 {selected.name}", 3000)
+
+    def _attempt_rebind(self, which: str) -> None:
+        """Attempt to find and bind an output device immediately.
+        `which` is 'virtual' or 'monitor'."""
+        try:
+            from audio.device_manager import DeviceManager, DeviceInfo
+        except Exception:
+            DeviceManager = None
+            DeviceInfo = None
+        try:
+            if which == 'virtual':
+                current = getattr(self.virtual_output, 'device_info', None)
+            else:
+                current = getattr(self.monitor_output, 'device_info', None)
+            saved_id = getattr(current, 'id', None) if current is not None else None
+            saved_desc = getattr(current, 'description', None) if current is not None else None
+            new_dev = None
+            if DeviceManager is not None:
+                try:
+                    new_dev = DeviceManager.find_output_by_id_or_description(saved_id, saved_desc)
+                except Exception:
+                    new_dev = None
+            if new_dev is None:
+                # try a best-effort pick from available outputs
+                try:
+                    outs = DeviceManager.get_output_devices() if DeviceManager is not None else []
+                    if outs:
+                        new_info = outs[0]
+                        new_dev = new_info.device
+                except Exception:
+                    new_dev = None
+            if new_dev is None:
+                self.statusBar().showMessage("未找到可绑定设备", 4000)
+                return
+            # construct DeviceInfo wrapper if possible
+            try:
+                dev_id = DeviceManager._qdevice_id(new_dev) if DeviceManager is not None else None
+                dev_desc = new_dev.description()
+                new_info = DeviceInfo(id=dev_id, description=dev_desc, device=new_dev) if DeviceInfo is not None else None
+            except Exception:
+                new_info = None
+            # apply to output
+            try:
+                if which == 'virtual':
+                    self.virtual_output.Stop()
+                    if new_info is not None:
+                        self.virtual_output.device_info = new_info
+                    self.virtual_output.Start(sample_rate=getattr(self, 'mixer', None).sample_rate if hasattr(self, 'mixer') else 48000,
+                                               channels=getattr(self, 'mixer', None).channels if hasattr(self, 'mixer') else 2)
+                    self.device_manager.save_selected_endpoint('primary_output', getattr(new_info, 'id', None))
+                else:
+                    self.monitor_output.Stop()
+                    if new_info is not None:
+                        self.monitor_output.device_info = new_info
+                    self.monitor_output.Start(sample_rate=48000, channels=2)
+                    self.device_manager.save_selected_endpoint('monitor_output', getattr(new_info, 'id', None))
+                self.statusBar().showMessage('重新绑定完成', 3000)
+            except Exception as e:
+                self.statusBar().showMessage(f'重新绑定失败: {e}', 5000)
+
+    def rebind_virtual_output(self) -> None:
+        self._attempt_rebind('virtual')
+
+    def rebind_monitor_output(self) -> None:
+        self._attempt_rebind('monitor')
 
     def toggle_pad(self, index: int) -> None:
         if index < 0 or index >= len(self.pads):
