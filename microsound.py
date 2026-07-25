@@ -8,6 +8,8 @@ from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioDevice, QAudioOutput, QMediaDevices, QMediaPlayer
 from audio.device_manager import DeviceManager
+from audio.interfaces import IAudioOutput
+from audio.outputs import VirtualMicOutput, MonitorOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication,
@@ -213,6 +215,11 @@ class MicroSoundWindow(QMainWindow):
 
         self._apply_selected_audio_output()
         self._apply_selected_monitor_output()
+        # Create output skeletons
+        sel_primary = self.audio_output_combo.currentData()
+        sel_monitor = self.monitor_output_combo.currentData()
+        self.virtual_output = VirtualMicOutput(device_info=sel_primary)
+        self.monitor_output = MonitorOutput(device_info=sel_monitor)
         self.player.mediaStatusChanged.connect(self.on_media_status)
         self.player.errorOccurred.connect(self.on_player_error)
 
@@ -241,6 +248,10 @@ class MicroSoundWindow(QMainWindow):
         self.local_hear_checkbox.setChecked(False)
         self.local_hear_checkbox.toggled.connect(self.on_local_hear_changed)
 
+        self.virtual_out_checkbox = QCheckBox("启用虚拟麦克风输出")
+        self.virtual_out_checkbox.setChecked(True)
+        self.virtual_out_checkbox.toggled.connect(self.on_virtual_out_changed)
+
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.stop)
         self.replay_button = QPushButton("重播")
@@ -253,6 +264,9 @@ class MicroSoundWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self._apply_input_device_selection()
         self.on_local_hear_changed(self.local_hear_checkbox.isChecked())
+        # default: virtual output enabled, monitor controlled by checkbox
+        self.virtual_output_enabled = True
+        self.monitor_output_enabled = self.local_hear_checkbox.isChecked()
         self.install_shortcuts()
         self.install_global_shortcuts()
         self.build_menu()
@@ -285,6 +299,7 @@ class MicroSoundWindow(QMainWindow):
         controls.addWidget(QLabel("监听音量"))
         controls.addWidget(self.monitor_volume_slider, 1)
         controls.addWidget(self.local_hear_checkbox)
+        controls.addWidget(self.virtual_out_checkbox)
         controls.addWidget(self.replay_button)
         controls.addWidget(self.stop_button)
         side_layout.addLayout(controls)
@@ -603,6 +618,25 @@ class MicroSoundWindow(QMainWindow):
         # 监听开关切换时应用监听音量
         self._apply_monitor_volume(self.monitor_volume_slider.value() / 100)
         self.statusBar().showMessage("本地监听已开启" if enabled else "本地监听已关闭", 2000)
+        # control monitor output enabled state
+        self.monitor_output_enabled = enabled
+        try:
+            if enabled:
+                self.monitor_output.Start()
+            else:
+                self.monitor_output.Stop()
+        except Exception:
+            pass
+
+    def on_virtual_out_changed(self, enabled: bool) -> None:
+        self.virtual_output_enabled = enabled
+        try:
+            if enabled:
+                self.virtual_output.Start()
+            else:
+                self.virtual_output.Stop()
+        except Exception:
+            pass
 
     def _apply_volume(self, volume: float) -> None:
         # 主输出始终使用配置的音量（用于推送到虚拟线/远端）
