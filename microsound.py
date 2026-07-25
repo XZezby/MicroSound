@@ -158,6 +158,16 @@ class MicroSoundWindow(QMainWindow):
         self.audio_output_combo.setCurrentIndex(0)
         self.audio_output_combo.currentIndexChanged.connect(self.on_audio_output_changed)
 
+        # 监听（Monitor）输出：UI 选择用，播放逻辑暂不改变（后续步骤接入）
+        self.audio_monitor = QAudioOutput(self)
+        self.audio_monitor.setVolume(0.85)
+        self.monitor_output_combo = QComboBox()
+        self.monitor_output_combo.addItem("默认监听输出", None)
+        for device in self.audio_devices:
+            self.monitor_output_combo.addItem(device.description(), device)
+        self.monitor_output_combo.setCurrentIndex(0)
+        self.monitor_output_combo.currentIndexChanged.connect(self.on_monitor_output_changed)
+
         self.input_devices = list(QMediaDevices.audioInputs())
         self.input_device_combo = QComboBox()
         self.input_device_combo.addItem("默认输入设备", None)
@@ -238,6 +248,8 @@ class MicroSoundWindow(QMainWindow):
         output_controls = QHBoxLayout()
         output_controls.addWidget(QLabel("输出设备"))
         output_controls.addWidget(self.audio_output_combo, 1)
+        output_controls.addWidget(QLabel("监听设备"))
+        output_controls.addWidget(self.monitor_output_combo, 1)
         side_layout.addLayout(output_controls)
 
         input_controls = QHBoxLayout()
@@ -400,6 +412,23 @@ class MicroSoundWindow(QMainWindow):
 
         try:
             self.audio.setDevice(selected_device)
+        except Exception:
+            pass
+
+    def on_monitor_output_changed(self, *_args: object) -> None:
+        self._apply_selected_monitor_output()
+
+    def _apply_selected_monitor_output(self) -> None:
+        selected_device = self.monitor_output_combo.currentData()
+        if selected_device is None:
+            try:
+                self.audio_monitor.setDevice(QMediaDevices.defaultAudioOutput())
+            except Exception:
+                pass
+            return
+
+        try:
+            self.audio_monitor.setDevice(selected_device)
         except Exception:
             pass
 
