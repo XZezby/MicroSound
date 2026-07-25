@@ -4,12 +4,14 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioDevice, QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -24,6 +26,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    import keyboard
+except ImportError:  # pragma: no cover - dependency is installed by the helper script
+    keyboard = None
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -47,7 +54,7 @@ class Pad:
 
 def default_pads() -> list[Pad]:
     return [
-        Pad(key=key, label=f"Pad {key}", file=f"media/pad_{key.lower()}.mp4")
+        Pad(key=key, label=f"Pad {key}", file=f"media/pad_{key.lower()}.mp3")
         for key in DEFAULT_KEYS
     ]
 
@@ -73,6 +80,10 @@ def save_pads(pads: list[Pad]) -> None:
     with CONFIG_PATH.open("w", encoding="utf-8") as handle:
         json.dump([asdict(pad) for pad in pads], handle, ensure_ascii=False, indent=2)
         handle.write("\n")
+
+
+class HotkeyBridge(QObject):
+    triggered = Signal(int)
 
 
 class PadButton(QFrame):
@@ -133,12 +144,38 @@ class MicroSoundWindow(QMainWindow):
         self.resize(1120, 720)
         self.pads = load_pads()
         self.pad_buttons: list[PadButton] = []
-        self.active_index: int | None = None
+        self.active_index = None
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.85)
         self.player.setAudioOutput(self.audio)
+        self.audio_devices = list(QMediaDevices.audioOutputs())
+        self.audio_output_combo = QComboBox()
+        self.audio_output_combo.addItem("默认输出", None)
+        for device in self.audio_devices:
+            self.audio_output_combo.addItem(device.description(), device)
+        self.audio_output_combo.setCurrentIndex(0)
+        self.audio_output_combo.currentIndexChanged.connect(self.on_audio_output_changed)
+
+        self.input_devices = list(QMediaDevices.audioInputs())
+        self.input_device_combo = QComboBox()
+        self.input_device_combo.addItem("优先 Stereo Mix / What U Hear", None)
+        preferred_names = ["stereo mix", "what u hear", "what-u-hear", "stereo-mix", "listen to this device"]
+        preferred_devices = []
+        for device in self.input_devices:
+            description = device.description().lower()
+            if any(name in description for name in preferred_names):
+                preferred_devices.append(device)
+        for device in preferred_devices:
+            self.input_device_combo.addItem(device.description(), device)
+        for device in self.input_devices:
+            if device not in preferred_devices:
+                self.input_device_combo.addItem(device.description(), device)
+        self.input_device_combo.setCurrentIndex(0)
+        self.input_device_combo.currentIndexChanged.connect(self.on_input_device_changed)
+
+        self._apply_selected_audio_output()
         self.player.mediaStatusChanged.connect(self.on_media_status)
         self.player.errorOccurred.connect(self.on_player_error)
 
@@ -155,16 +192,26 @@ class MicroSoundWindow(QMainWindow):
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(85)
-        self.volume_slider.valueChanged.connect(lambda value: self.audio.setVolume(value / 100))
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
+
+        self.local_hear_checkbox = QCheckBox("本地监听")
+        self.local_hear_checkbox.setChecked(False)
+        self.local_hear_checkbox.toggled.connect(self.on_local_hear_changed)
 
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.stop)
         self.replay_button = QPushButton("重播")
         self.replay_button.clicked.connect(self.replay)
 
+        self.hotkey_bridge = HotkeyBridge(self)
+        self.hotkey_bridge.triggered.connect(self.toggle_pad)
+
         self.setCentralWidget(self.build_ui())
         self.setStatusBar(QStatusBar())
+        self._apply_input_device_selection()
+        self.on_local_hear_changed(self.local_hear_checkbox.isChecked())
         self.install_shortcuts()
+        self.install_global_shortcuts()
         self.build_menu()
         self.apply_styles()
 
@@ -192,9 +239,20 @@ class MicroSoundWindow(QMainWindow):
         controls = QHBoxLayout()
         controls.addWidget(QLabel("音量"))
         controls.addWidget(self.volume_slider, 1)
+        controls.addWidget(self.local_hear_checkbox)
         controls.addWidget(self.replay_button)
         controls.addWidget(self.stop_button)
         side_layout.addLayout(controls)
+
+        output_controls = QHBoxLayout()
+        output_controls.addWidget(QLabel("输出设备"))
+        output_controls.addWidget(self.audio_output_combo, 1)
+        side_layout.addLayout(output_controls)
+
+        input_controls = QHBoxLayout()
+        input_controls.addWidget(QLabel("输入设备"))
+        input_controls.addWidget(self.input_device_combo, 1)
+        side_layout.addLayout(input_controls)
 
         layout.addWidget(grid_widget, 3)
         layout.addWidget(side, 2)
@@ -212,9 +270,37 @@ class MicroSoundWindow(QMainWindow):
         file_menu.addAction(stop_action)
 
     def install_shortcuts(self) -> None:
+        if keyboard is not None:
+            return
+
         for index, pad in enumerate(self.pads):
-            shortcut = QShortcut(QKeySequence(pad.key), self)
-            shortcut.activated.connect(lambda i=index: self.play_pad(i))
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{pad.key}"), self)
+            shortcut.activated.connect(lambda i=index: self.toggle_pad(i))
+
+        pause_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
+        pause_shortcut.activated.connect(self.pause_current)
+
+    def install_global_shortcuts(self) -> None:
+        if keyboard is None:
+            return
+
+        try:
+            keyboard.unhook_all_hotkeys()
+        except Exception:
+            pass
+
+        for index, pad in enumerate(self.pads):
+            keyboard.add_hotkey(f"ctrl+{pad.key.lower()}", lambda i=index: self.toggle_pad(i))
+
+        keyboard.add_hotkey("ctrl+p", self.pause_current)
+
+    def closeEvent(self, event: object) -> None:
+        if keyboard is not None:
+            try:
+                keyboard.unhook_all_hotkeys()
+            except Exception:
+                pass
+        super().closeEvent(event)
 
     def play_pad(self, index: int) -> None:
         if index < 0 or index >= len(self.pads):
@@ -239,9 +325,9 @@ class MicroSoundWindow(QMainWindow):
         pad = self.pads[index]
         file_name, _ = QFileDialog.getOpenFileName(
             self,
-            f"为 {pad.key} 选择 mp4",
+            f"为 {pad.key} 选择 mp3",
             str(APP_DIR / "media"),
-            "MP4 Video (*.mp4);;All Files (*)",
+            "MP3 Audio (*.mp3);;All Files (*)",
         )
         if not file_name:
             return
@@ -257,8 +343,34 @@ class MicroSoundWindow(QMainWindow):
         save_pads(self.pads)
         self.statusBar().showMessage(f"{pad.key} 已绑定到 {selected.name}", 3000)
 
+    def toggle_pad(self, index: int) -> None:
+        if index < 0 or index >= len(self.pads):
+            return
+
+        state = self.player.playbackState()
+        if self.active_index == index and state in {QMediaPlayer.PlayingState, QMediaPlayer.PausedState}:
+            self.stop()
+            return
+
+        self.play_pad(index)
+
     def replay(self) -> None:
         if self.active_index is not None:
+            self.play_pad(self.active_index)
+
+    def pause_current(self) -> None:
+        if self.active_index is None:
+            return
+
+        state = self.player.playbackState()
+        if state == QMediaPlayer.PlayingState:
+            self.player.pause()
+            self.now_label.setText(f"{self.pads[self.active_index].key} / {self.pads[self.active_index].label} (已暂停)")
+            self.statusBar().showMessage("已暂停", 2000)
+        elif state == QMediaPlayer.PausedState:
+            self.player.play()
+            self.statusBar().showMessage("继续播放", 2000)
+        else:
             self.play_pad(self.active_index)
 
     def stop(self) -> None:
@@ -272,6 +384,7 @@ class MicroSoundWindow(QMainWindow):
         for index, button in enumerate(self.pad_buttons):
             if index < len(self.pads):
                 button.refresh(self.pads[index])
+        self.install_global_shortcuts()
         self.clear_active_pad()
         self.statusBar().showMessage("配置已重新加载", 2500)
 
@@ -284,6 +397,76 @@ class MicroSoundWindow(QMainWindow):
         if self.active_index is not None and self.active_index < len(self.pad_buttons):
             self.pad_buttons[self.active_index].set_active(False)
         self.active_index = None
+
+    def _apply_selected_audio_output(self) -> None:
+        selected_device = self.audio_output_combo.currentData()
+        if selected_device is None:
+            try:
+                self.audio.setDevice(QMediaDevices.defaultAudioOutput())
+            except Exception:
+                pass
+            return
+
+        try:
+            self.audio.setDevice(selected_device)
+        except Exception:
+            pass
+
+    def on_audio_output_changed(self, *_args: object) -> None:
+        self._apply_selected_audio_output()
+
+    def on_input_device_changed(self, *_args: object) -> None:
+        self._apply_input_device_selection()
+
+    def _is_loopback_input_device(self, device: object = None) -> bool:
+        if device is None:
+            return False
+
+        description = str(device.description()).lower()
+        loopback_markers = ["stereo mix", "what u hear", "what-u-hear", "stereo-mix", "listen to this device"]
+        return any(marker in description for marker in loopback_markers)
+
+    def _apply_input_device_selection(self) -> None:
+        selected_input = self.input_device_combo.currentData()
+        if selected_input is None:
+            self.local_hear_checkbox.setEnabled(True)
+            self.statusBar().showMessage(
+                "已优先尝试 Stereo Mix / What U Hear；若系统未暴露该输入源，程序将无法把音频直接送入它。",
+                4000,
+            )
+            return
+
+        if self._is_loopback_input_device(selected_input):
+            self.local_hear_checkbox.setChecked(False)
+            self.local_hear_checkbox.setEnabled(False)
+            self.statusBar().showMessage(
+                f"已选择混音输入：{selected_input.description()}。为避免回音，已自动关闭本地监听。",
+                5000,
+            )
+            return
+
+        self.local_hear_checkbox.setEnabled(True)
+        self.statusBar().showMessage(f"已选择输入设备：{selected_input.description()}", 3000)
+
+    def on_volume_changed(self, value: int) -> None:
+        self._apply_volume(value / 100)
+
+    def on_local_hear_changed(self, enabled: bool) -> None:
+        selected_input = self.input_device_combo.currentData()
+        if self._is_loopback_input_device(selected_input):
+            self.local_hear_checkbox.setChecked(False)
+            self._apply_volume(0.0)
+            self.statusBar().showMessage("混音输入会把本地输出再次采进去，因此已自动关闭本地监听。", 4000)
+            return
+
+        self._apply_volume(self.volume_slider.value() / 100)
+        self.statusBar().showMessage("本地监听已开启" if enabled else "本地监听已关闭", 2000)
+
+    def _apply_volume(self, volume: float) -> None:
+        if self.local_hear_checkbox.isChecked():
+            self.audio.setVolume(volume)
+        else:
+            self.audio.setVolume(0.0)
 
     def on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.EndOfMedia:
@@ -302,7 +485,7 @@ class MicroSoundWindow(QMainWindow):
                 color: #f4f7fb;
             }
             QWidget {
-                font-size: 15px;
+                font-size: 14px;
             }
             QMenuBar, QMenu {
                 background: #20242b;
