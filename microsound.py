@@ -167,6 +167,13 @@ class MicroSoundWindow(QMainWindow):
             self.monitor_output_combo.addItem(device.description(), device)
         self.monitor_output_combo.setCurrentIndex(0)
         self.monitor_output_combo.currentIndexChanged.connect(self.on_monitor_output_changed)
+        self.monitor_status_label = QLabel("")
+
+        # 监听系统设备变更，自动刷新设备列表
+        try:
+            QMediaDevices.audioOutputsChanged.connect(self.on_audio_outputs_changed)
+        except Exception:
+            pass
         # 降阶实现：额外的 QMediaPlayer 用于本地监听（将来替换为单一 AudioEngine）
         self.player_monitor = QMediaPlayer(self)
         self.player_monitor.setAudioOutput(self.audio_monitor)
@@ -262,6 +269,7 @@ class MicroSoundWindow(QMainWindow):
         output_controls.addWidget(self.audio_output_combo, 1)
         output_controls.addWidget(QLabel("监听设备"))
         output_controls.addWidget(self.monitor_output_combo, 1)
+        output_controls.addWidget(self.monitor_status_label)
         side_layout.addLayout(output_controls)
 
         input_controls = QHBoxLayout()
@@ -461,10 +469,68 @@ class MicroSoundWindow(QMainWindow):
                 self.audio_monitor.setDevice(QMediaDevices.defaultAudioOutput())
             except Exception:
                 pass
+            self.monitor_status_label.setText("监听: 使用默认输出")
             return
 
         try:
             self.audio_monitor.setDevice(selected_device)
+            self.monitor_status_label.setText(f"监听: {selected_device.description()}")
+        except Exception:
+            # 设备不可用
+            try:
+                self.monitor_status_label.setText("监听: 设备不可用")
+            except Exception:
+                pass
+            return
+
+    def on_audio_outputs_changed(self) -> None:
+        # 重新获取设备列表并尝试保持用户选择
+        try:
+            current_primary = self.audio_output_combo.currentData()
+            current_monitor = self.monitor_output_combo.currentData()
+            primary_desc = current_primary.description() if current_primary is not None else None
+            monitor_desc = current_monitor.description() if current_monitor is not None else None
+
+            self.audio_devices = list(QMediaDevices.audioOutputs())
+
+            # 更新 primary 列表
+            self.audio_output_combo.blockSignals(True)
+            self.audio_output_combo.clear()
+            self.audio_output_combo.addItem("默认输出", None)
+            for device in self.audio_devices:
+                self.audio_output_combo.addItem(device.description(), device)
+            # 尝试恢复选择
+            if primary_desc:
+                for i in range(self.audio_output_combo.count()):
+                    data = self.audio_output_combo.itemData(i)
+                    try:
+                        if data is not None and data.description() == primary_desc:
+                            self.audio_output_combo.setCurrentIndex(i)
+                            break
+                    except Exception:
+                        pass
+            self.audio_output_combo.blockSignals(False)
+
+            # 更新 monitor 列表
+            self.monitor_output_combo.blockSignals(True)
+            self.monitor_output_combo.clear()
+            self.monitor_output_combo.addItem("默认监听输出", None)
+            for device in self.audio_devices:
+                self.monitor_output_combo.addItem(device.description(), device)
+            if monitor_desc:
+                for i in range(self.monitor_output_combo.count()):
+                    data = self.monitor_output_combo.itemData(i)
+                    try:
+                        if data is not None and data.description() == monitor_desc:
+                            self.monitor_output_combo.setCurrentIndex(i)
+                            break
+                    except Exception:
+                        pass
+            self.monitor_output_combo.blockSignals(False)
+
+            # 重新应用选择并更新状态标签
+            self._apply_selected_audio_output()
+            self._apply_selected_monitor_output()
         except Exception:
             pass
 
