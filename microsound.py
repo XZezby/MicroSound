@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioDevice, QAudioOutput, QMediaDevices, QMediaPlayer
+from audio.device_manager import DeviceManager
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication,
@@ -150,12 +151,25 @@ class MicroSoundWindow(QMainWindow):
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.85)
         self.player.setAudioOutput(self.audio)
-        self.audio_devices = list(QMediaDevices.audioOutputs())
+        # Use DeviceManager to enumerate outputs and restore previous selection
+        self.device_manager = DeviceManager()
+        self.audio_devices = self.device_manager.get_output_devices()
         self.audio_output_combo = QComboBox()
         self.audio_output_combo.addItem("默认输出", None)
-        for device in self.audio_devices:
-            self.audio_output_combo.addItem(device.description(), device)
-        self.audio_output_combo.setCurrentIndex(0)
+        for dev in self.audio_devices:
+            self.audio_output_combo.addItem(dev.description, dev)
+        # try to restore saved primary endpoint
+        saved_primary = self.device_manager.load_selected_endpoint("primary_output")
+        if saved_primary:
+            for i in range(self.audio_output_combo.count()):
+                data = self.audio_output_combo.itemData(i)
+                try:
+                    if data is not None and data.id == saved_primary:
+                        self.audio_output_combo.setCurrentIndex(i)
+                        break
+                except Exception:
+                    pass
+        self.audio_output_combo.setCurrentIndex(self.audio_output_combo.currentIndex() or 0)
         self.audio_output_combo.currentIndexChanged.connect(self.on_audio_output_changed)
 
         # 监听（Monitor）输出：UI 选择用，播放逻辑暂不改变（后续步骤接入）
@@ -163,9 +177,20 @@ class MicroSoundWindow(QMainWindow):
         self.audio_monitor.setVolume(0.85)
         self.monitor_output_combo = QComboBox()
         self.monitor_output_combo.addItem("默认监听输出", None)
-        for device in self.audio_devices:
-            self.monitor_output_combo.addItem(device.description(), device)
-        self.monitor_output_combo.setCurrentIndex(0)
+        for dev in self.audio_devices:
+            self.monitor_output_combo.addItem(dev.description, dev)
+        # try to restore saved monitor endpoint
+        saved_monitor = self.device_manager.load_selected_endpoint("monitor_output")
+        if saved_monitor:
+            for i in range(self.monitor_output_combo.count()):
+                data = self.monitor_output_combo.itemData(i)
+                try:
+                    if data is not None and data.id == saved_monitor:
+                        self.monitor_output_combo.setCurrentIndex(i)
+                        break
+                except Exception:
+                    pass
+        self.monitor_output_combo.setCurrentIndex(self.monitor_output_combo.currentIndex() or 0)
         self.monitor_output_combo.currentIndexChanged.connect(self.on_monitor_output_changed)
         self.monitor_status_label = QLabel("")
 
@@ -455,7 +480,17 @@ class MicroSoundWindow(QMainWindow):
             return
 
         try:
-            self.audio.setDevice(selected_device)
+            # selected_device may be a DeviceInfo (from DeviceManager)
+            try:
+                self.audio.setDevice(selected_device.device)
+            except Exception:
+                # fallback if it's already a QAudioDevice
+                self.audio.setDevice(selected_device)
+            # persist selection
+            try:
+                self.device_manager.save_selected_endpoint("primary_output", getattr(selected_device, "id", None))
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -473,8 +508,16 @@ class MicroSoundWindow(QMainWindow):
             return
 
         try:
-            self.audio_monitor.setDevice(selected_device)
-            self.monitor_status_label.setText(f"监听: {selected_device.description()}")
+            try:
+                self.audio_monitor.setDevice(selected_device.device)
+            except Exception:
+                self.audio_monitor.setDevice(selected_device)
+            self.monitor_status_label.setText(f"监听: {getattr(selected_device, 'description', str(selected_device))}")
+            # persist selection
+            try:
+                self.device_manager.save_selected_endpoint("monitor_output", getattr(selected_device, "id", None))
+            except Exception:
+                pass
         except Exception:
             # 设备不可用
             try:
@@ -491,20 +534,21 @@ class MicroSoundWindow(QMainWindow):
             primary_desc = current_primary.description() if current_primary is not None else None
             monitor_desc = current_monitor.description() if current_monitor is not None else None
 
-            self.audio_devices = list(QMediaDevices.audioOutputs())
+            # rebuild using DeviceInfo
+            self.audio_devices = self.device_manager.get_output_devices()
 
             # 更新 primary 列表
             self.audio_output_combo.blockSignals(True)
             self.audio_output_combo.clear()
             self.audio_output_combo.addItem("默认输出", None)
-            for device in self.audio_devices:
-                self.audio_output_combo.addItem(device.description(), device)
+            for dev in self.audio_devices:
+                self.audio_output_combo.addItem(dev.description, dev)
             # 尝试恢复选择
             if primary_desc:
                 for i in range(self.audio_output_combo.count()):
                     data = self.audio_output_combo.itemData(i)
                     try:
-                        if data is not None and data.description() == primary_desc:
+                        if data is not None and getattr(data, "description", None) == primary_desc:
                             self.audio_output_combo.setCurrentIndex(i)
                             break
                     except Exception:
@@ -515,13 +559,14 @@ class MicroSoundWindow(QMainWindow):
             self.monitor_output_combo.blockSignals(True)
             self.monitor_output_combo.clear()
             self.monitor_output_combo.addItem("默认监听输出", None)
-            for device in self.audio_devices:
-                self.monitor_output_combo.addItem(device.description(), device)
+            for dev in self.audio_devices:
+                # audio_devices here are DeviceInfo from get_output_devices
+                self.monitor_output_combo.addItem(dev.description, dev)
             if monitor_desc:
                 for i in range(self.monitor_output_combo.count()):
                     data = self.monitor_output_combo.itemData(i)
                     try:
-                        if data is not None and data.description() == monitor_desc:
+                        if data is not None and getattr(data, "description", None) == monitor_desc:
                             self.monitor_output_combo.setCurrentIndex(i)
                             break
                     except Exception:
