@@ -199,6 +199,12 @@ class MicroSoundWindow(QMainWindow):
         self.volume_slider.setValue(85)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
 
+        # 监听音量（独立于主音量）
+        self.monitor_volume_slider = QSlider(Qt.Horizontal)
+        self.monitor_volume_slider.setRange(0, 100)
+        self.monitor_volume_slider.setValue(85)
+        self.monitor_volume_slider.valueChanged.connect(self.on_monitor_volume_changed)
+
         self.local_hear_checkbox = QCheckBox("本地监听")
         self.local_hear_checkbox.setChecked(False)
         self.local_hear_checkbox.toggled.connect(self.on_local_hear_changed)
@@ -244,6 +250,8 @@ class MicroSoundWindow(QMainWindow):
         controls = QHBoxLayout()
         controls.addWidget(QLabel("音量"))
         controls.addWidget(self.volume_slider, 1)
+        controls.addWidget(QLabel("监听音量"))
+        controls.addWidget(self.monitor_volume_slider, 1)
         controls.addWidget(self.local_hear_checkbox)
         controls.addWidget(self.replay_button)
         controls.addWidget(self.stop_button)
@@ -481,6 +489,8 @@ class MicroSoundWindow(QMainWindow):
 
     def on_local_hear_changed(self, enabled: bool) -> None:
         self._apply_volume(self.volume_slider.value() / 100)
+        # 监听开关切换时应用监听音量
+        self._apply_monitor_volume(self.monitor_volume_slider.value() / 100)
         self.statusBar().showMessage("本地监听已开启" if enabled else "本地监听已关闭", 2000)
 
     def _apply_volume(self, volume: float) -> None:
@@ -489,7 +499,16 @@ class MicroSoundWindow(QMainWindow):
             self.audio.setVolume(volume)
         except Exception:
             pass
-        # 监听输出由本地监听开关控制
+        # 监听输出使用独立监听音量（受本地监听开关控制）
+        try:
+            self._apply_monitor_volume(self.monitor_volume_slider.value() / 100)
+        except Exception:
+            pass
+
+    def on_monitor_volume_changed(self, value: int) -> None:
+        self._apply_monitor_volume(value / 100)
+
+    def _apply_monitor_volume(self, volume: float) -> None:
         try:
             if self.local_hear_checkbox.isChecked():
                 self.audio_monitor.setVolume(volume)
